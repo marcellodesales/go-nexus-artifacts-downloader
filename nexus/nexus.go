@@ -15,9 +15,10 @@ import (
 
 // http://tour.golang.org/#16
 const (
-	NEXUS_REPO           = "https://repo1.maven.org/maven2/"
-	CFP_PACKAGE_METADATA = "org/springframework/cloud/_SERVICE_NAME_/maven-metadata.xml"
-	NEXUS_URL            = NEXUS_REPO + CFP_PACKAGE_METADATA
+	NEXUS_REPO                  = "https://repo1.maven.org/maven2"
+	NEXUS_PACKAGE               = "/org/springframework/cloud/_SERVICE_NAME_"
+	NEXUS_ARTIFACT_METADATA_URL = NEXUS_REPO + NEXUS_PACKAGE + "/maven-metadata.xml"
+	NEXUS_ARTIFACT_FILE_URL     = NEXUS_REPO + NEXUS_PACKAGE + "/_VERSION_/_SERVICE_NAME_-_VERSION_-exec.jar"
 )
 
 // Parse the array http://play.golang.org/p/7lQnQOCh0I
@@ -43,7 +44,7 @@ type ServiceMetadata struct {
 
 func (sm *ServiceMetadata) GetUrl() string {
 	// short var declaration without "var" http://tour.golang.org/#13
-	url := strings.Replace(NEXUS_URL, "_SERVICE_NAME_", sm.Name, -1)
+	url := strings.Replace(NEXUS_ARTIFACT_METADATA_URL, "_SERVICE_NAME_", sm.Name, -1)
 	log.Printf("Will return %s", url)
 	return url
 }
