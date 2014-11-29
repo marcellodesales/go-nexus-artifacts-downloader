@@ -7,9 +7,11 @@ package nexus
 import (
 	"encoding/xml"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 )
 
@@ -42,11 +44,13 @@ type ServiceMetadata struct {
 	Metadata *MavenMetadata `The metadata of the service`
 }
 
-func (sm *ServiceMetadata) GetUrl() string {
-	// short var declaration without "var" http://tour.golang.org/#13
-	url := strings.Replace(NEXUS_ARTIFACT_METADATA_URL, "_SERVICE_NAME_", sm.Name, -1)
-	log.Printf("Will return %s", url)
-	return url
+func (sm *ServiceMetadata) GetMetadataUrl() string {
+	return strings.Replace(NEXUS_ARTIFACT_METADATA_URL, "_SERVICE_NAME_", sm.Name, -1)
+}
+
+func (sm *ServiceMetadata) GetFileUrl(version string) string {
+	serviceUrl := strings.Replace(NEXUS_ARTIFACT_FILE_URL, "_SERVICE_NAME_", sm.Name, -1)
+	return strings.Replace(serviceUrl, "_VERSION_", version, -1)
 }
 
 func (nm *MavenMetadata) parseXml() {
@@ -70,7 +74,8 @@ func NewMavenMetadata(xmlDocument string) *MavenMetadata {
 }
 
 func (sm *ServiceMetadata) load() {
-	url := sm.GetUrl()
+	// short var declaration without "var" http://tour.golang.org/#13
+	url := sm.GetMetadataUrl()
 	log.Printf("Received url %s", url)
 	// Download a URL http://golang.org/pkg/net/http/
 	metadataXmlResponse, err := http.Get(url)
@@ -96,4 +101,35 @@ func NewServiceMetadata(serviceName string) *ServiceMetadata {
 
 	sm.load()
 	return &sm
+}
+
+func (sm *ServiceMetadata) Download(version string) {
+	url := sm.GetFileUrl(version)
+	tokens := strings.Split(url, "/")
+	fileName := tokens[len(tokens)-1]
+	fmt.Println("Downloading", url, "to", fileName)
+
+	// TODO: check file existence first with io.IsExist
+	// TODO: check if the file to be downloaded ETag is different
+	output, err := os.Create(fileName)
+	if err != nil {
+		fmt.Println("Error while creating", fileName, "-", err)
+		return
+	}
+	defer output.Close()
+
+	response, err := http.Get(url)
+	if err != nil {
+		fmt.Println("Error while downloading", url, "-", err)
+		return
+	}
+	defer response.Body.Close()
+
+	n, err := io.Copy(output, response.Body)
+	if err != nil {
+		fmt.Println("Error while downloading", url, "-", err)
+		return
+	}
+
+	fmt.Println(n, "bytes downloaded.")
 }
