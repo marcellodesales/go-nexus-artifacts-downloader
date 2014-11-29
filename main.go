@@ -3,6 +3,7 @@ package main
 
 // http://tour.golang.org/#5
 import (
+	"./cfp"
 	"./nexus"
 	"log"
 )
@@ -10,7 +11,9 @@ import (
 func main() {
 	// Struct literals http://tour.golang.org/#29, https://golang.org/doc/effective_go.html#composite_literals
 	// Less boilerplate code that uses the new (type) http://tour.golang.org/#30
-	service := nexus.NewServiceMetadata("spring-cloud-config-server")
+	log.Printf("Loading services from Nexus at %s", nexus.NEXUS_REPO)
+	service := cfp.NewServiceMetadata("spring-cloud-config-server")
+
 	log.Printf("Going to load Service '" + service.Name + "' from " + service.GetMetadataUrl())
 	version := service.Metadata.Versioning.Latest
 	log.Printf("Downloading selected version %s", version)

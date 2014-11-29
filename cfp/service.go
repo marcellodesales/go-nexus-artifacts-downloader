@@ -1,10 +1,11 @@
 // http://tour.golang.org/#4
-package nexus
+package cfp
 
 // Refer to the Effective use at https://golang.org/doc/effective_go.html
 
 // http://tour.golang.org/#5
 import (
+	"../nexus"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,8 +24,8 @@ const (
 )
 
 type ServiceMetadata struct {
-	Name     string         `The name of the service`
-	Metadata *MavenMetadata `The metadata of the service`
+	Name     string               `The name of the service`
+	Metadata *nexus.MavenMetadata `The metadata of the service`
 }
 
 func (sm *ServiceMetadata) GetMetadataUrl() string {
@@ -36,7 +37,7 @@ func (sm *ServiceMetadata) GetFileUrl(version string) string {
 	return strings.Replace(serviceUrl, "_VERSION_", version, -1)
 }
 
-func (sm *ServiceMetadata) load() {
+func (sm *ServiceMetadata) loadNexusMetadata() {
 	// short var declaration without "var" http://tour.golang.org/#13
 	url := sm.GetMetadataUrl()
 	log.Printf("Received url %s", url)
@@ -53,7 +54,7 @@ func (sm *ServiceMetadata) load() {
 		fmt.Printf("%s", err)
 	}
 
-	sm.Metadata = NewMavenMetadata(string(body))
+	sm.Metadata = nexus.NewMavenMetadata(string(body))
 }
 
 func NewServiceMetadata(serviceName string) *ServiceMetadata {
@@ -62,7 +63,7 @@ func NewServiceMetadata(serviceName string) *ServiceMetadata {
 	}
 	log.Printf("Going to load Service '" + serviceName)
 
-	sm.load()
+	sm.loadNexusMetadata()
 	return &sm
 }
 
