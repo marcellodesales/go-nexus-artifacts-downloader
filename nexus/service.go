@@ -5,7 +5,6 @@ package nexus
 
 // http://tour.golang.org/#5
 import (
-	"encoding/xml"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -23,22 +22,6 @@ const (
 	NEXUS_ARTIFACT_FILE_URL     = NEXUS_REPO + NEXUS_PACKAGE + "/_VERSION_/_SERVICE_NAME_-_VERSION_-exec.jar"
 )
 
-// Parse the array http://play.golang.org/p/7lQnQOCh0I
-type Versioning struct {
-	Latest      string   `xml:"latest"`
-	Release     string   `xml:"release"`
-	LastUpdated string   `xml:"lastUpdated"`
-	Versions    []string `xml:"versions>version"`
-}
-
-// http://tour.golang.org/#26
-type MavenMetadata struct {
-	GroupId    string      `xml:"groupId"`
-	ArtifactId string      `xml:"artifactId"`
-	Versioning *Versioning `xml:"versioning"`
-	xmlDoc     string      `The downloaded xml`
-}
-
 type ServiceMetadata struct {
 	Name     string         `The name of the service`
 	Metadata *MavenMetadata `The metadata of the service`
@@ -51,26 +34,6 @@ func (sm *ServiceMetadata) GetMetadataUrl() string {
 func (sm *ServiceMetadata) GetFileUrl(version string) string {
 	serviceUrl := strings.Replace(NEXUS_ARTIFACT_FILE_URL, "_SERVICE_NAME_", sm.Name, -1)
 	return strings.Replace(serviceUrl, "_VERSION_", version, -1)
-}
-
-func (nm *MavenMetadata) parseXml() {
-	// For larger XML files, use the events http://blog.davidsingleton.org/parsing-huge-xml-files-with-go/
-	// https://github.com/dps/go-xml-parse
-	// Pointers http://tour.golang.org/#28, http://tour.golang.org/#29
-	if err := xml.Unmarshal([]byte(nm.xmlDoc), nm); err != nil {
-		log.Fatalln(err)
-	}
-}
-
-func NewMavenMetadata(xmlDocument string) *MavenMetadata {
-	metadata := MavenMetadata{
-		// Type conversion http://tour.golang.org/#15, Types http://tour.golang.org/#14
-		xmlDoc: xmlDocument,
-	}
-	// Parse the xml
-	metadata.parseXml()
-	log.Println("The value is %#v", metadata)
-	return &metadata
 }
 
 func (sm *ServiceMetadata) load() {
@@ -107,29 +70,35 @@ func (sm *ServiceMetadata) Download(version string) {
 	url := sm.GetFileUrl(version)
 	tokens := strings.Split(url, "/")
 	fileName := tokens[len(tokens)-1]
-	fmt.Println("Downloading", url, "to", fileName)
+	log.Println("Downloading", url, "to", fileName)
 
-	// TODO: check file existence first with io.IsExist
-	// TODO: check if the file to be downloaded ETag is different
-	output, err := os.Create(fileName)
-	if err != nil {
-		fmt.Println("Error while creating", fileName, "-", err)
+	// equivalent to Python's `if os.path.exists(filename)`
+	if _, err := os.Stat(fileName); err == nil {
+		log.Printf("File %s exists...", fileName)
 		return
 	}
-	defer output.Close()
-
+	// Download the file
 	response, err := http.Get(url)
 	if err != nil {
-		fmt.Println("Error while downloading", url, "-", err)
+		log.Println("Error while downloading", url, "-", err)
 		return
 	}
 	defer response.Body.Close()
 
+	// Create a file to store it
+	output, err := os.Create(fileName)
+	if err != nil {
+		log.Println("Error while creating", fileName, "-", err)
+		return
+	}
+	defer output.Close()
+
+	// Transfer the bytes to the file.
 	n, err := io.Copy(output, response.Body)
 	if err != nil {
-		fmt.Println("Error while downloading", url, "-", err)
+		log.Println("Error saving the downloaded file", url, "-", err)
 		return
 	}
 
-	fmt.Println(n, "bytes downloaded.")
+	log.Println(n, "bytes downloaded.")
 }
