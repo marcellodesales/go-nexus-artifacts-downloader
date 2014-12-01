@@ -9,10 +9,6 @@ import (
 	"log"
 )
 
-const (
-	NEXUS_REPO = "https://repo1.maven.org/maven2"
-)
-
 // Parse the array http://play.golang.org/p/7lQnQOCh0I
 type Versioning struct {
 	Latest      string   `xml:"latest"`
