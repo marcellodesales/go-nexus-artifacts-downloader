@@ -25,40 +25,46 @@ type ArtifactsList struct {
 	repositoryPath string
 	// The groupId of the artifact "org.springframework.cloud"
 	groupId string
-	// The map of the resources under the package that will be loaded "config, cli, bus, etc"
-	Index map[string]ArtifactResourceUrl
+	// The map of the resources under the package that will be loaded "quadf, taxreturn, etc"
+	Index map[string]*MavenMetadata
 	// Filter closure for the artifact list.
 	filter ListFilter
 }
 
 // makeRepoUrl builds a new repo URL based on the given repoName
-// [serverHost http://https://repo1.maven.org maven2/org/springframework/cloud][repoPath /nexus2]
+// [serverHost http://https://repo1.maven.org][repoPath /nexus2]
 func (ml *ArtifactsList) makeRepoUrl() string {
 	return ml.serverHost + "/" + ml.repositoryPath
 }
 
 // makePackageUrl builds the groupId URL based on the given groupId. Note that it must use the "." notation or "/"
-// com.intuit.cfp.sp.service => REPO_URL/com/intuit/cfp/sp/service
+// org.springframework.cloud => REPO_URL/org/springframework/cloud
 func (ml *ArtifactsList) makeGroupIdUrl() string {
 	return ml.makeRepoUrl() + "/" + strings.Replace(ml.groupId, ".", "/", -1)
 }
 
 // makeServiceUrl build the artifactId URL based on the artifactId.
-// http://pprdnexusas301.corp.intuit.net/nexus/content/groups/ENG.CTG-Releases/com/intuit/cfp/sp/service/[serviceName quadf]
+// groupID_URL/[artifactId spring-config-server]
 func (ml *ArtifactsList) makeArtifactIdUrl(artifactId string) string {
 	return ml.makeGroupIdUrl() + "/" + artifactId
 }
 
 // GetMetadataUrl builds the URL to retrieve the maven-metadata.xml from a service.
-// http://pprdnexusas301.corp.intuit.net/nexus/content/groups/ENG.CTG-Releases/com/intuit/cfp/sp/service/[serviceName quadf]
-// serviceName = quadf
+// artifactId/[artifactId spring-config-server/maven-metadata.xml]
 func (ml *ArtifactsList) GetArtifactMetadataUrl(artifactId string) string {
 	return ml.makeArtifactIdUrl(artifactId) + "/maven-metadata.xml"
 }
 
-// GetFileUrl builds the URL to retrieve the binary for the given service version.
+// GetFileUrl builds the URL to retrieve the binary for the given server version.
 func (ml *ArtifactsList) GetArtifactZipUrl(artifactId, version string) string {
 	return ml.makeArtifactIdUrl(artifactId) + "/" + version + "/" + artifactId + "-" + version + ".jar"
+}
+
+// GetFileUrl builds the URL to retrieve the binary for the given service version.
+func (list *ArtifactsList) GetLatestArtifactZipUrl(artifactId string) string {
+	mavenMetadata := list.Index[artifactId]
+	latestVersion := mavenMetadata.Versioning.Latest
+	return list.GetArtifactZipUrl(artifactId, latestVersion)
 }
 
 // load Will retrieve all the services available in the packages Url using screen-scrapping.
@@ -85,10 +91,14 @@ func (ml *ArtifactsList) fetch() {
 		// Remove the trailing "/"
 		artifactId = artifactId[:len(artifactId)-1]
 
-		ml.Index[artifactId] = ArtifactResourceUrl{
+		// Build the urls from the service
+		urls := ArtifactResourceUrl{
 			Resource: ml.makeArtifactIdUrl(artifactId),
 			Metadata: ml.GetArtifactMetadataUrl(artifactId),
 		}
+
+		// Index them for the artifactId
+		ml.Index[artifactId] = NewMavenMetadata(&urls)
 	})
 }
 
@@ -103,7 +113,7 @@ func NewArtifactsList(nexusHost, repoPath, groupId string, filter ListFilter) *A
 		// arrays and slices http://tour.golang.org/#32
 		// Maps http://tour.golang.org/#39, literals http://tour.golang.org/#40, http://tour.golang.org/#42,
 		// http://tour.golang.org/#43
-		Index:  make(map[string]ArtifactResourceUrl),
+		Index:  make(map[string]*MavenMetadata),
 		filter: filter,
 	}
 	ml.fetch()

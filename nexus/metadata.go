@@ -6,7 +6,10 @@ package nexus
 // http://tour.golang.org/#5
 import (
 	"encoding/xml"
+	"fmt"
+	"io/ioutil"
 	"log"
+	"net/http"
 )
 
 // Parse the array http://play.golang.org/p/7lQnQOCh0I
@@ -19,12 +22,19 @@ type Versioning struct {
 
 // http://tour.golang.org/#26
 type MavenMetadata struct {
-	GroupId    string      `xml:"groupId"`
-	ArtifactId string      `xml:"artifactId"`
+	// The Metadata URL where this was downloaded
+	Urls *ArtifactResourceUrl
+	// The xml Document downloaded from the metadata Url
+	xmlDoc string
+	// The GroupId of the metadata XML document (PARSED)
+	GroupId string `xml:"groupId"`
+	// The artifact Id of the metadata XML document (PARSED)
+	ArtifactId string `xml:"artifactId"`
+	// The versioning of the metadata XML document (PARSED)
 	Versioning *Versioning `xml:"versioning"`
-	xmlDoc     string      `The downloaded xml`
 }
 
+// parseXml Will bind the values of the xmlDocument to the struct based on the bindings defined.
 func (nm *MavenMetadata) parseXml() {
 	// For larger XML files, use the events http://blog.davidsingleton.org/parsing-huge-xml-files-with-go/
 	// https://github.com/dps/go-xml-parse
@@ -34,11 +44,37 @@ func (nm *MavenMetadata) parseXml() {
 	}
 }
 
-func NewMavenMetadata(xmlDocument string) *MavenMetadata {
-	metadata := MavenMetadata{
-		// Type conversion http://tour.golang.org/#15, Types http://tour.golang.org/#14
-		xmlDoc: xmlDocument,
+// loadNexusMetadataXmlDoc Loads the xmlDoc from the given URL given.
+func (mm *MavenMetadata) loadNexusMetadataXmlDoc() {
+	// short var declaration without "var" http://tour.golang.org/#13
+	url := mm.Urls.Metadata
+	log.Printf("Received url %s", url)
+	// Download a URL http://golang.org/pkg/net/http/
+	metadataXmlResponse, err := http.Get(url)
+	if err != nil {
+		fmt.Printf("%s", err)
+		log.Printf("Error is " + err.Error())
 	}
+
+	defer metadataXmlResponse.Body.Close()
+	body, err := ioutil.ReadAll(metadataXmlResponse.Body)
+	if err != nil {
+		fmt.Printf("%s", err)
+	}
+
+	mm.xmlDoc = string(body)
+}
+
+// NewMavenMetadata creates a new instance based on the give metadataUrl. It will
+// fetch the xmlDocument from that URL and parse it to an instance of MavenMetadata.
+func NewMavenMetadata(urls *ArtifactResourceUrl) *MavenMetadata {
+	metadata := MavenMetadata{
+		Urls: urls,
+	}
+
+	// Load the XML document
+	metadata.loadNexusMetadataXmlDoc()
+
 	// Parse the xml
 	metadata.parseXml()
 	return &metadata
