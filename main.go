@@ -3,7 +3,6 @@ package main
 
 // http://tour.golang.org/#5
 import (
-	//	"./cfp"
 	"./nexus"
 	"log"
 	"strings"

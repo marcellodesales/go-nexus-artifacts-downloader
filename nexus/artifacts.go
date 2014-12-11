@@ -6,11 +6,6 @@ import (
 	"strings"
 )
 
-type ArtifactResourceUrl struct {
-	Resource string
-	Metadata string
-}
-
 // Closures http://www.golang-book.com/7/index.htm#section4, http://tour.golang.org/#45,
 // Closure types http://jordanorelli.com/post/42369331748/function-types-in-go-golang
 type ListFilter func(string) bool
@@ -26,7 +21,7 @@ type ArtifactsList struct {
 	// The groupId of the artifact "org.springframework.cloud"
 	groupId string
 	// The map of the resources under the package that will be loaded "quadf, taxreturn, etc"
-	Index map[string]*MavenMetadata
+	Index map[string]*Artifact
 	// Filter closure for the artifact list.
 	filter ListFilter
 }
@@ -63,13 +58,19 @@ func (ml *ArtifactsList) GetArtifactZipUrl(artifactId, version string) string {
 // GetFileUrl builds the URL to retrieve the binary for the given service version.
 func (list *ArtifactsList) GetLatestArtifactZipUrl(artifactId string) string {
 	mavenMetadata := list.Index[artifactId]
-	latestVersion := mavenMetadata.Versioning.Latest
+	latestVersion := mavenMetadata.Metadata.Versioning.Latest
 	return list.GetArtifactZipUrl(artifactId, latestVersion)
 }
 
+// makePackageUrl builds the groupId URL based on the given groupId. Note that it must use the "." notation or "/"
+// org.springframework.cloud => REPO_URL/org/springframework/cloud
+func (al *ArtifactsList) MakeGroupIdUrl() string {
+	return al.makeRepoUrl() + "/" + strings.Replace(al.groupId, ".", "/", -1)
+}
+
 // load Will retrieve all the services available in the packages Url using screen-scrapping.
-func (ml *ArtifactsList) fetch() {
-	groupIdUrl := ml.makeGroupIdUrl()
+func (al *ArtifactsList) fetch() {
+	groupIdUrl := al.MakeGroupIdUrl()
 	log.Println("Loading the package list " + groupIdUrl)
 
 	// Screen-scrape the nexus packages list https://github.com/PuerkitoBio/goquery#examples
@@ -84,21 +85,15 @@ func (ml *ArtifactsList) fetch() {
 		artifactId := s.Text()
 
 		// Skip the directory parent directory and the user's filter
-		if strings.Contains(artifactId, " ") || !ml.filter(artifactId) {
+		if strings.Contains(artifactId, " ") || !al.filter(artifactId) {
 			return
 		}
 
 		// Remove the trailing "/"
 		artifactId = artifactId[:len(artifactId)-1]
 
-		// Build the urls from the service
-		urls := ArtifactResourceUrl{
-			Resource: ml.makeArtifactIdUrl(artifactId),
-			Metadata: ml.GetArtifactMetadataUrl(artifactId),
-		}
-
 		// Index them for the artifactId
-		ml.Index[artifactId] = NewMavenMetadata(&urls)
+		al.Index[artifactId] = NewArtifact(al, artifactId)
 	})
 }
 
@@ -113,7 +108,7 @@ func NewArtifactsList(nexusHost, repoPath, groupId string, filter ListFilter) *A
 		// arrays and slices http://tour.golang.org/#32
 		// Maps http://tour.golang.org/#39, literals http://tour.golang.org/#40, http://tour.golang.org/#42,
 		// http://tour.golang.org/#43
-		Index:  make(map[string]*MavenMetadata),
+		Index:  make(map[string]*Artifact),
 		filter: filter,
 	}
 	ml.fetch()

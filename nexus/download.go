@@ -13,6 +13,7 @@ import (
 type Result string
 type Download func() Result
 
+// Downloads an array of files in parallel http://talks.golang.org/2012/concurrency.slide#47
 func fanInDownloads(files []string) (results []Result) {
 	c := make(chan Result)
 
@@ -21,7 +22,7 @@ func fanInDownloads(files []string) (results []Result) {
 		go func() { c <- nexusDownload(fileName)() }()
 	}
 
-	timeout := time.After(8000 * time.Millisecond)
+	timeout := time.After(1 * time.Minute)
 	for i := 0; i < len(files); i++ {
 		select {
 		case result := <-c:
@@ -36,6 +37,7 @@ func fanInDownloads(files []string) (results []Result) {
 	return
 }
 
+// Downloads a single url http://talks.golang.org/2012/concurrency.slide#47
 func nexusDownload(url string) Download {
 	return func() Result {
 		tokens := strings.Split(url, "/")
@@ -80,18 +82,22 @@ func nexusDownload(url string) Download {
 
 // getArtifactsUrlList Builds the list of URLs to be downloaded based on the
 // Lavest version of the artifacts.
-func (list *ArtifactsList) getArtifactsUrlList() []string {
-	urls := make([]string, 0, len(list.Index))
-	for artifactId, _ := range list.Index {
-		urls = append(urls, list.GetLatestArtifactZipUrl(artifactId))
+func (al *ArtifactsList) getArtifactsUrlList() []string {
+	urls := make([]string, 0, len(al.Index))
+	for _, artifact := range al.Index {
+		// TODO: Filter the filtered list of artifacts already loaded.
+		version := artifact.Metadata.Versioning.Latest
+		extension := ".zip"
+		urls = append(urls, artifact.GetArtifactUrl(version, extension))
 	}
 	return urls
 }
 
-func (ml *ArtifactsList) DownloadAllList() {
+// DownloadAllList downloads all the collected artifacts latest versions in parallel.
+func (al *ArtifactsList) DownloadAllList() {
 	start := time.Now()
 
-	files := ml.getArtifactsUrlList()
+	files := al.getArtifactsUrlList()
 
 	results := fanInDownloads(files)
 	elapsed := time.Since(start)
