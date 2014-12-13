@@ -6,15 +6,25 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
 
+// The result of a download.
 type Result string
+
+// The Download function that takes a result.
 type Download func() Result
 
+// Download Progress
+type Progress struct {
+	log      string
+	finished bool
+}
+
 // Downloads an array of files in parallel http://talks.golang.org/2012/concurrency.slide#47
-func fanInDownloads(files []string) (results []Result) {
+func fanInDownloads(files []string, progressChannel chan Progress) (results []Result) {
 	c := make(chan Result)
 
 	for i := 0; i < len(files); i++ {
@@ -22,18 +32,33 @@ func fanInDownloads(files []string) (results []Result) {
 		go func() { c <- nexusDownload(fileName)() }()
 	}
 
-	timeout := time.After(1 * time.Minute)
+	go monitor(progressChannel)
+
+	timeout := time.After(20 * time.Minute)
+
+downloadAllFiles:
 	for i := 0; i < len(files); i++ {
 		select {
 		case result := <-c:
-			fmt.Println("FINISHED: " + result)
+			progressChannel <- Progress{
+				log: "FINISHED[" + strconv.Itoa(i) + "]: " + string(result),
+			}
 			results = append(results, result)
 
 		case <-timeout:
-			fmt.Println("timed out")
-			return
+			progressChannel <- Progress{
+				log: "1m TIMEOUT[" + strconv.Itoa(i) + "]: Missing " + strconv.Itoa(len(files)-i),
+			}
+			break downloadAllFiles
 		}
 	}
+
+	progressChannel <- Progress{
+		log:      "FINISHED ALL",
+		finished: true,
+	}
+	close(progressChannel)
+
 	return
 }
 
@@ -46,18 +71,21 @@ func nexusDownload(url string) Download {
 
 		// equivalent to Python's `if os.path.exists(filename)`
 		if _, err := os.Stat(fileName); err == nil {
-			log.Printf("File %s exists...", fileName)
 			return Result("File " + fileName + " already exists")
 		}
 
 		// Download the file
 		start := time.Now()
+
+		// HTTP GET the file
 		response, err := http.Get(url)
-		elapsed := time.Since(start)
 		if err != nil {
 			log.Println("Error while downloading", url, "-", err)
-			return Result("Error while downloading: " + url)
+			return Result(fmt.Sprintf("Error while downloading", url, ":", err))
 		}
+		// Go's built-in defer statement defers execution of the
+		// specified function until the current function returns.
+		// https://coderwall.com/p/cp5fya/measuring-execution-time-in-go
 		defer response.Body.Close()
 
 		// Create a file to store it
@@ -68,15 +96,19 @@ func nexusDownload(url string) Download {
 		}
 		defer output.Close()
 
-		// Transfer the bytes to the file.
-		n, err := io.Copy(output, response.Body)
+		// Transfer the bytes to the file, blocking here (both are deferred references)
+		// When the output and response.Body are ready, this will continue
+		totalBytes, err := io.Copy(output, response.Body)
+
+		// https://coderwall.com/p/cp5fya/measuring-execution-time-in-go
+		elapsed := time.Since(start)
+
 		if err != nil {
 			log.Println("Error saving the downloaded file", url, "-", err)
 			return Result("Error while saving the file " + fileName)
 		}
 
-		log.Println(n, "bytes downloaded from ", url, " in ", elapsed)
-		return Result(fmt.Sprintf("%s downloaded in %d", fileName, elapsed))
+		return Result(fmt.Sprintf("%d bytes downloaded and saved as %s in %s", totalBytes, fileName, elapsed))
 	}
 }
 
@@ -87,19 +119,35 @@ func (al *ArtifactsList) getArtifactsUrlList() []string {
 	for _, artifact := range al.Index {
 		// TODO: Filter the filtered list of artifacts already loaded.
 		version := artifact.Metadata.Versioning.Latest
-		extension := ".zip"
+		extension := ".jar"
 		urls = append(urls, artifact.GetArtifactUrl(version, extension))
 	}
 	return urls
+}
+
+// Monitors the progress of a Progress channel.
+func monitor(progress chan Progress) {
+	for {
+		select {
+		case event := <-progress:
+			fmt.Println("MONITORING: " + event.log)
+			if event.finished {
+				return
+			}
+		}
+	}
+
 }
 
 // DownloadAllList downloads all the collected artifacts latest versions in parallel.
 func (al *ArtifactsList) DownloadAllList() {
 	start := time.Now()
 
+	progressChannel := make(chan Progress)
+
 	files := al.getArtifactsUrlList()
 
-	results := fanInDownloads(files)
+	results := fanInDownloads(files, progressChannel)
 	elapsed := time.Since(start)
 	fmt.Println(results)
 	fmt.Println(elapsed)
