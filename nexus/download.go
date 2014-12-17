@@ -2,6 +2,7 @@ package nexus
 
 import (
 	"fmt"
+	"github.com/cheggaaa/pb"
 	"io"
 	"log"
 	"net/http"
@@ -11,11 +12,28 @@ import (
 	"time"
 )
 
+// Inspired by https://github.com/thbar/golang-playground/blob/master/download-files.go
+// http://stackoverflow.com/questions/11692860/how-can-i-efficiently-download-a-large-file-using-go
+
 // The result of a download.
 type Result string
 
 // The Download function that takes a result.
 type Download func() Result
+
+type UrlMetadata struct {
+	url    string
+	name   string
+	length int64
+	err    string
+}
+
+type UrlDownload struct {
+	metadata    *UrlMetadata
+	progressBar *pb.ProgressBar
+}
+
+type ResourceSizeDownload func() UrlMetadata
 
 // Download Progress
 type Progress struct {
@@ -23,56 +41,152 @@ type Progress struct {
 	finished bool
 }
 
-// Downloads an array of files in parallel http://talks.golang.org/2012/concurrency.slide#47
-func fanInDownloads(files []string, progressChannel chan Progress) (results []Result) {
-	c := make(chan Result)
+func collectBarsIndex(urls []string) map[string]*UrlDownload {
+	// Channel for the results
+	c := make(chan UrlMetadata)
 
-	for i := 0; i < len(files); i++ {
-		fileName := files[i]
-		go func() { c <- nexusDownload(fileName)() }()
+	// The resulting index of the resources fileNames and their progress bars
+	barsIndex := make(map[string]*UrlDownload)
+
+	// Retrieve the resources Length in parallel
+	for i := 0; i < len(urls); i++ {
+		url := urls[i]
+		go func() { c <- retrieveResourceLength(url)() }()
 	}
 
-	go monitor(progressChannel)
+	timeout := time.After(1 * time.Minute)
 
-	timeout := time.After(20 * time.Minute)
-
-downloadAllFiles:
-	for i := 0; i < len(files); i++ {
+collectResourceSize:
+	for i := 0; i < len(urls); i++ {
 		select {
 		case result := <-c:
-			progressChannel <- Progress{
-				log: "FINISHED[" + strconv.Itoa(i) + "]: " + string(result),
+			if result.length == -1 {
+				continue
 			}
+
+			// create bar
+			bar := pb.New64(result.length).SetUnits(pb.U_BYTES)
+			bar.SetRefreshRate(time.Millisecond * 10).Prefix(result.name)
+			bar.ShowSpeed = true
+
+			// Index the bar for the filename of the resource
+			barsIndex[result.url] = &UrlDownload{
+				metadata:    &result,
+				progressBar: bar,
+			}
+
+		case <-timeout:
+			break collectResourceSize
+		}
+	}
+	return barsIndex
+}
+
+// Downloads a single url http://talks.golang.org/2012/concurrency.slide#47
+func retrieveResourceLength(url string) ResourceSizeDownload {
+	return func() UrlMetadata {
+		tokens := strings.Split(url, "/")
+		fileName := tokens[len(tokens)-1]
+		log.Println("Processing", url, "to", fileName)
+
+		// equivalent to Python's `if os.path.exists(filename)`
+		if _, err := os.Stat(fileName); err == nil {
+			return UrlMetadata{
+				url:    url,
+				name:   fileName,
+				err:    "File " + fileName + " already exists",
+				length: -1,
+			}
+		}
+
+		response, err := http.Head(url)
+		if err != nil {
+			log.Println("Error while downloading", url, ":", err)
+			return UrlMetadata{
+				url:    url,
+				name:   fileName,
+				err:    fmt.Sprintf("Error while downloading", url, ": ", err),
+				length: -1,
+			}
+		}
+
+		// Verify if the response was ok
+		if response.StatusCode != http.StatusOK {
+			log.Println("Server return non-200 status: %v\n", response.Status)
+			return UrlMetadata{
+				url:    url,
+				name:   fileName,
+				err:    "Server return non-200 status: " + response.Status,
+				length: -1,
+			}
+		}
+
+		length, _ := strconv.Atoi(response.Header.Get("Content-Length"))
+		sourceSize := int64(length)
+		return UrlMetadata{
+			url:    url,
+			name:   fileName,
+			length: sourceSize,
+			err:    "",
+		}
+	}
+}
+
+// Downloads an array of files in parallel http://talks.golang.org/2012/concurrency.slide#47
+func fanInDownloads(urls []string) (results []Result) {
+
+	// Retrieve the bars index for each URL
+	urlsDownloadIndex := collectBarsIndex(urls)
+
+	// Create the progress bar pool and fill it out
+	pool := &pb.Pool{}
+	for _, urlDownload := range urlsDownloadIndex {
+		pool.Add(urlDownload.progressBar)
+	}
+	pool.Start()
+
+	// Create a channel to wait for the download results
+	c := make(chan Result)
+
+	// Concurrently download the URLs
+	for i := 0; i < len(urls); i++ {
+		url := urls[i]
+		urlDownload := urlsDownloadIndex[url]
+		go func() { c <- nexusDownload(urlDownload)() }()
+	}
+
+	// The final result
+	results = make([]Result, 0, len(urls))
+
+	// Give a total download time for all the resources
+	timeout := time.After(20 * time.Minute)
+
+	// Collect the results by listening to the result channel
+downloadAllFiles:
+	for i := 0; i < len(urls); i++ {
+		select {
+		case result := <-c:
 			results = append(results, result)
 
 		case <-timeout:
-			progressChannel <- Progress{
-				log: "1m TIMEOUT[" + strconv.Itoa(i) + "]: Missing " + strconv.Itoa(len(files)-i),
-			}
 			break downloadAllFiles
 		}
 	}
-
-	progressChannel <- Progress{
-		log:      "FINISHED ALL",
-		finished: true,
-	}
-	close(progressChannel)
+	// TODO: Compute which files were NOT downloaded due to timeout
 
 	return
 }
 
 // Downloads a single url http://talks.golang.org/2012/concurrency.slide#47
-func nexusDownload(url string) Download {
+func nexusDownload(urlDownload *UrlDownload) Download {
 	return func() Result {
-		tokens := strings.Split(url, "/")
-		fileName := tokens[len(tokens)-1]
-		log.Println("Downloading", url, "to", fileName)
 
-		// equivalent to Python's `if os.path.exists(filename)`
-		if _, err := os.Stat(fileName); err == nil {
-			return Result("File " + fileName + " already exists")
+		// Upon errors, the length will NOT be filled
+		if urlDownload.metadata.length == -1 {
+			return Result(urlDownload.metadata.err)
 		}
+
+		url := urlDownload.metadata.url
 
 		// Download the file
 		start := time.Now()
@@ -80,25 +194,37 @@ func nexusDownload(url string) Download {
 		// HTTP GET the file
 		response, err := http.Get(url)
 		if err != nil {
-			log.Println("Error while downloading", url, "-", err)
-			return Result(fmt.Sprintf("Error while downloading", url, ":", err))
+			return Result(fmt.Sprintf("Error while downloading %s: %v", url, err))
 		}
 		// Go's built-in defer statement defers execution of the
 		// specified function until the current function returns.
 		// https://coderwall.com/p/cp5fya/measuring-execution-time-in-go
 		defer response.Body.Close()
 
+		// Verify if the response was ok
+		if response.StatusCode != http.StatusOK {
+			return Result(fmt.Sprintf("Server return non-200 status: %v\n", response.Status))
+		}
+
+		fileName := urlDownload.metadata.name
+
 		// Create a file to store it
 		output, err := os.Create(fileName)
 		if err != nil {
 			log.Println("Error while creating", fileName, "-", err)
-			return Result("Error while creating " + fileName)
+			return Result(fmt.Sprintf("Error while creating %s: %v", fileName, err))
 		}
 		defer output.Close()
 
+		// create multi writer
+		writer := io.MultiWriter(output, urlDownload.progressBar)
+
 		// Transfer the bytes to the file, blocking here (both are deferred references)
 		// When the output and response.Body are ready, this will continue
-		totalBytes, err := io.Copy(output, response.Body)
+		totalBytes, err := io.Copy(writer, response.Body)
+
+		// Stop the bar
+		urlDownload.progressBar.Finish()
 
 		// https://coderwall.com/p/cp5fya/measuring-execution-time-in-go
 		elapsed := time.Since(start)
@@ -143,11 +269,9 @@ func monitor(progress chan Progress) {
 func (al *ArtifactsList) DownloadAllList() {
 	start := time.Now()
 
-	progressChannel := make(chan Progress)
+	urls := al.getArtifactsUrlList()
 
-	files := al.getArtifactsUrlList()
-
-	results := fanInDownloads(files, progressChannel)
+	results := fanInDownloads(urls)
 	elapsed := time.Since(start)
 	fmt.Println(results)
 	fmt.Println(elapsed)
