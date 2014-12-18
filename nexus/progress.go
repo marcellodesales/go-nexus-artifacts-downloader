@@ -1,8 +1,10 @@
 package nexus
 
+// @Author Marcello_deSales@intuit.com
+
 import (
 	"fmt"
-	"github.com/cheggaaa/pb"
+	"github.com/marcellodesales/pb"
 	"log"
 	"net/http"
 	"os"
@@ -11,8 +13,8 @@ import (
 	"time"
 )
 
-// Inspired by https://github.com/thbar/golang-playground/blob/master/download-files.go
-// http://stackoverflow.com/questions/11692860/how-can-i-efficiently-download-a-large-file-using-go
+// Inspired by Docker's parallel Images layer downloads
+// https://github.com/cheggaaa/pb/issues/31#issuecomment-67401973
 
 // The Url Metadata collected during the HTTP Head.
 type UrlMetadata struct {
@@ -57,7 +59,7 @@ collectResourceSize:
 
 			// create bar
 			bar := pb.New64(urlMetadata.length).SetUnits(pb.U_BYTES)
-			bar.SetRefreshRate(time.Millisecond * 10).Prefix(urlMetadata.name)
+			bar.SetRefreshRate(time.Millisecond * 10).Prefix("[" + urlMetadata.name + "] ")
 			bar.ShowSpeed = true
 
 			// Index the bar for the filename of the resource
@@ -70,7 +72,32 @@ collectResourceSize:
 			break collectResourceSize
 		}
 	}
+
+	// Initialize the pool internally
+	createProgressBarPool(barsIndex)
+
+	// Return the bars index
 	return barsIndex
+}
+
+// NewUrlMetadata builds a new pointer to the instance of UrlMetadata for successful cases.
+func NewUrlMetadata(url, name string, length int64) UrlMetadata {
+	return UrlMetadata{
+		url:    url,
+		name:   name,
+		length: length,
+		err:    "",
+	}
+}
+
+// NewUrlMetadata builds a new pointer to the instance of UrlMetadata for error cases.
+func NewUrlMetadataError(url, name, err string) UrlMetadata {
+	return UrlMetadata{
+		url:    url,
+		name:   name,
+		length: -1,
+		err:    err,
+	}
 }
 
 // retrieveResourceLength will execute an HTTP HEAD request and collect the Content-Length of the given
@@ -85,12 +112,7 @@ func retrieveResourceLength(url string) ResourceSizeDownload {
 
 		// equivalent to Python's `if os.path.exists(filename)`
 		if _, err := os.Stat(fileName); err == nil {
-			return UrlMetadata{
-				url:    url,
-				name:   fileName,
-				err:    "File " + fileName + " already exists",
-				length: -1,
-			}
+			return NewUrlMetadataError(url, fileName, fmt.Sprintf("File %s already exists", fileName))
 		}
 
 		// Make an HTTP HEAD for the given URL
@@ -99,33 +121,31 @@ func retrieveResourceLength(url string) ResourceSizeDownload {
 		// If any problem occurs, just return the error.
 		if err != nil {
 			log.Println("Error while downloading", url, ":", err)
-			return UrlMetadata{
-				url:    url,
-				name:   fileName,
-				err:    fmt.Sprintf("Error while downloading", url, ": ", err),
-				length: -1,
-			}
+			return NewUrlMetadataError(url, fileName, fmt.Sprintf("Error while downloading", url, ": ", err))
 		}
 
 		// Verify if the response was ok
 		if response.StatusCode != http.StatusOK {
 			log.Println("Server return non-200 status: %v\n", response.Status)
-			return UrlMetadata{
-				url:    url,
-				name:   fileName,
-				err:    "Server return non-200 status: " + response.Status,
-				length: -1,
-			}
+			return NewUrlMetadataError(url, fileName, fmt.Sprintf("Server return non-200 status: %d", response.Status))
 		}
 
 		// Retrieve the value of the length of the resource by looking at the HTTP Header below
 		length, _ := strconv.Atoi(response.Header.Get("Content-Length"))
 		sourceSize := int64(length)
-		return UrlMetadata{
-			url:    url,
-			name:   fileName,
-			length: sourceSize,
-			err:    "",
-		}
+
+		// Retrieve the metadata value
+		return NewUrlMetadata(url, fileName, sourceSize)
 	}
+}
+
+// createProgressBarPool creates the pool of progress bars for a given array of urls.
+func createProgressBarPool(urlsDownloadIndex map[string]*UrlDownload) *pb.Pool {
+	// Create the progress bar pool and fill it out
+	pool := &pb.Pool{}
+	for _, urlDownload := range urlsDownloadIndex {
+		pool.Add(urlDownload.progressBar)
+	}
+	pool.Start()
+	return pool
 }
