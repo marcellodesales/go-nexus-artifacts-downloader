@@ -44,5 +44,17 @@ spring-cloud-config-server-1.0.2.RELEASE.jar69.76 KB / 69.76 KB [===============
 spring-cloud-netflix-eureka-server-1.0.3.RELEASE.jar399.58 KB / 457.02 KB [===============================================>------] 87.43 % 152.35 KB/s 0
 [2311 bytes downloaded and saved as spring-cloud-starter-eureka-server-1.0.3.RELEASE.jar in 254.771316ms 71431 bytes downloaded and saved as spring-cloud-config-server-1.0.2.RELEASE.jar in 998.652254ms 467989 bytes downloaded and saved as spring-cloud-netflix-eureka-server-1.0.3.RELEASE.jar in 2.704306592s]
 3.646426643s
+```
 
+As a result, the files listed are downloaded:
+
+```sh
+mdesales@ubuntu [10/26/2015 22:36:34] ~/go/src/github.com/marcellodesales/go-nexus-downloader (master) $ git status
+On branch master
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+
+	spring-cloud-config-server-1.0.2.RELEASE.jar
+	spring-cloud-netflix-eureka-server-1.0.3.RELEASE.jar
+	spring-cloud-starter-eureka-server-1.0.3.RELEASE.jar
 ```
