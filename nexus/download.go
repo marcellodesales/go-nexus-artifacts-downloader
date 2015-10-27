@@ -2,6 +2,7 @@ package nexus
 
 import (
 	"fmt"
+	"github.com/cheggaaa/pb"
 	"io"
 	"log"
 	"net/http"
@@ -23,6 +24,13 @@ func fanInDownloads(urls []string) (results []Result) {
 
 	// Retrieve the bars index for each URL
 	urlsDownloadIndex := collectBarsIndex(urls)
+
+	// Create the progress bar pool and fill it out
+	pool := &pb.Pool{}
+	for _, urlDownload := range urlsDownloadIndex {
+		pool.Add(urlDownload.progressBar)
+	}
+	pool.Start()
 
 	// Create a channel to wait for the download results
 	c := make(chan Result)
@@ -52,9 +60,6 @@ downloadAllFiles:
 		}
 	}
 	// TODO: Compute which files were NOT downloaded due to timeout
-
-	// Sleepting 1s to let the last downloaded file to finish printing the progress update.
-	time.Sleep(1 * time.Second)
 
 	return
 }
